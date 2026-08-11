@@ -231,3 +231,51 @@ func TestParseFilenameAndBuildFilenameRoundtrip(t *testing.T) {
 		})
 	}
 }
+
+func TestNewSequentialID(t *testing.T) {
+	tests := []struct {
+		name   string
+		prefix string
+		start  int
+		taken  []string
+		want   string
+	}{
+		{"empty board starts at start", "p-", 1, nil, "p-1"},
+		{"continues after existing", "p-", 1, []string{"p-1", "p-2"}, "p-3"},
+		{"honors a start floor", "p-", 3000, []string{"p-1", "p-2"}, "p-3000"},
+		{"skips a taken number at the floor", "p-", 3000, []string{"p-3000", "p-3001"}, "p-3002"},
+		// A random ID that happens to be all digits must not push numbering past it.
+		{"ignores unrelated numeric IDs above the floor", "p-", 3000, []string{"p-9755"}, "p-3000"},
+		{"skips that number when numbering reaches it", "p-", 9755, []string{"p-9755"}, "p-9756"},
+		{"ignores non-numeric IDs", "p-", 1, []string{"p-abc1", "p-z9q2"}, "p-1"},
+		{"start below one is clamped", "p-", 0, nil, "p-1"},
+		{"works without a prefix", "", 1, []string{"1"}, "2"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			taken := make(map[string]bool, len(tt.taken))
+			for _, id := range tt.taken {
+				taken[id] = true
+			}
+			got := NewSequentialID(tt.prefix, tt.start, func(id string) bool { return taken[id] })
+			if got != tt.want {
+				t.Errorf("NewSequentialID(%q, %d, %v) = %q, want %q", tt.prefix, tt.start, tt.taken, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestNewSequentialIDDoesNotRepeat(t *testing.T) {
+	taken := map[string]bool{}
+	for i := 0; i < 100; i++ {
+		id := NewSequentialID("p-", 1, func(id string) bool { return taken[id] })
+		if taken[id] {
+			t.Fatalf("NewSequentialID returned %q twice", id)
+		}
+		taken[id] = true
+	}
+	if len(taken) != 100 {
+		t.Errorf("expected 100 distinct IDs, got %d", len(taken))
+	}
+}

@@ -173,12 +173,36 @@ type Config struct {
 // BeansConfig defines settings for bean creation.
 type BeansConfig struct {
 	// Path is the path to the beans directory (relative to config file location)
-	Path           string `yaml:"path,omitempty"`
-	Prefix         string `yaml:"prefix"`
+	Path   string `yaml:"path,omitempty"`
+	Prefix string `yaml:"prefix"`
+	// IDMode selects how new bean IDs are generated.
+	IDMode IDMode `yaml:"id_mode,omitempty"`
+	// IDStart is the lowest number sequential IDs may use. Numbers already taken by
+	// an existing bean, archived ones included, are skipped.
+	IDStart int `yaml:"id_start,omitempty"`
+	// IDLength is the length of the random suffix, used only by IDModeRandom.
 	IDLength       int    `yaml:"id_length"`
 	DefaultStatus  string `yaml:"default_status,omitempty"`
 	DefaultType    string `yaml:"default_type,omitempty"`
 	RequireIfMatch bool   `yaml:"require_if_match,omitempty"`
+}
+
+// IDMode selects how new bean IDs are generated.
+type IDMode string
+
+const (
+	// IDModeSequential numbers beans in order: "myproject-1", "myproject-2".
+	// Readable and sortable, but two branches creating a bean at the same time can
+	// pick the same number, and nothing in Git will flag the clash.
+	IDModeSequential IDMode = "sequential"
+	// IDModeRandom gives each bean a random suffix: "myproject-abc1". Ugly to read
+	// and to say out loud, but two agents on two branches cannot collide.
+	IDModeRandom IDMode = "random"
+)
+
+// IsValidIDMode reports whether mode is a recognized ID generation mode.
+func IsValidIDMode(mode IDMode) bool {
+	return mode == IDModeSequential || mode == IDModeRandom
 }
 
 // Default returns a Config with default values.
@@ -187,6 +211,8 @@ func Default() *Config {
 		Beans: BeansConfig{
 			Path:          DefaultBeansPath,
 			Prefix:        "",
+			IDMode:        IDModeSequential,
+			IDStart:       1,
 			IDLength:      4,
 			DefaultStatus: "todo",
 			DefaultType:   "task",
@@ -280,6 +306,16 @@ func Load(configPath string) (*Config, error) {
 	}
 	if cfg.Beans.IDLength == 0 {
 		cfg.Beans.IDLength = 4
+	}
+	if cfg.Beans.IDMode == "" {
+		cfg.Beans.IDMode = IDModeSequential
+	}
+	if !IsValidIDMode(cfg.Beans.IDMode) {
+		return nil, fmt.Errorf("invalid id_mode %q in %s (must be %q or %q)",
+			cfg.Beans.IDMode, configPath, IDModeSequential, IDModeRandom)
+	}
+	if cfg.Beans.IDStart < 1 {
+		cfg.Beans.IDStart = 1
 	}
 	if cfg.Beans.DefaultStatus == "" {
 		cfg.Beans.DefaultStatus = "todo"
@@ -396,8 +432,18 @@ func (c *Config) toYAMLNode() *yaml.Node {
 	prefixKey.HeadComment = "Prefix for bean IDs (e.g., \"myproject-abc1\")"
 	beansMapping.Content = append(beansMapping.Content, prefixKey, strNode(c.Beans.Prefix))
 
+	idModeKey := strNode("id_mode")
+	idModeKey.HeadComment = "How new IDs are generated: \"sequential\" (myproject-1) or\n" +
+		"\"random\" (myproject-abc1). Sequential IDs read better; random ones cannot\n" +
+		"collide when several branches or agents create beans at the same time."
+	beansMapping.Content = append(beansMapping.Content, idModeKey, strNode(string(c.Beans.IDMode)))
+
+	idStartKey := strNode("id_start")
+	idStartKey.HeadComment = "Lowest number sequential IDs may use. Taken numbers are skipped."
+	beansMapping.Content = append(beansMapping.Content, idStartKey, intNode(c.Beans.IDStart))
+
 	idLenKey := strNode("id_length")
-	idLenKey.HeadComment = "Length of the random ID suffix"
+	idLenKey.HeadComment = "Length of the random ID suffix (random mode only)"
 	beansMapping.Content = append(beansMapping.Content, idLenKey, intNode(c.Beans.IDLength))
 
 	if c.Beans.DefaultStatus != "" {

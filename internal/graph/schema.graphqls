@@ -376,6 +376,8 @@ input CreateBeanInput {
   blockedBy: [String!]
   "Custom ID prefix (overrides config prefix for this bean)"
   prefix: String
+  "Give this bean a random ID even when the project is configured for sequential IDs"
+  randomId: Boolean
 }
 
 """

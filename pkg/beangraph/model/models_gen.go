@@ -219,6 +219,8 @@ type CreateBeanInput struct {
 	BlockedBy []string `json:"blockedBy,omitempty"`
 	// Custom ID prefix (overrides config prefix for this bean)
 	Prefix *string `json:"prefix,omitempty"`
+	// Give this bean a random ID even when the project is configured for sequential IDs
+	RandomID *bool `json:"randomId,omitempty"`
 }
 
 // Input for attaching a file or directory as context to an agent message.

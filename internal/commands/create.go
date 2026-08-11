@@ -24,6 +24,7 @@ var (
 	createBlocking  []string
 	createBlockedBy []string
 	createPrefix    string
+	createRandomID  bool
 	createJSON      bool
 )
 
@@ -98,6 +99,10 @@ var createCmd = &cobra.Command{
 			input.Prefix = &createPrefix
 		}
 
+		if createRandomID {
+			input.RandomID = &createRandomID
+		}
+
 		// Create via core resolver
 		resolver := &beangraph.CoreResolver{Core: core}
 		b, err := resolver.CreateBean(context.Background(), input)
@@ -139,6 +144,7 @@ func RegisterCreateCmd(root *cobra.Command) {
 	createCmd.Flags().StringArrayVar(&createBlocking, "blocking", nil, "ID of bean this blocks (can be repeated)")
 	createCmd.Flags().StringArrayVar(&createBlockedBy, "blocked-by", nil, "ID of bean that blocks this one (can be repeated)")
 	createCmd.Flags().StringVar(&createPrefix, "prefix", "", "Custom ID prefix (overrides config prefix)")
+	createCmd.Flags().BoolVar(&createRandomID, "random-id", false, "Use a random ID instead of the next sequential one")
 	createCmd.Flags().BoolVar(&createJSON, "json", false, "Output as JSON")
 	createCmd.MarkFlagsMutuallyExclusive("body", "body-file")
 	root.AddCommand(createCmd)

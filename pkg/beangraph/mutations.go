@@ -82,20 +82,18 @@ func (r *CoreResolver) CreateBean(ctx context.Context, input model.CreateBeanInp
 		b.BlockedBy = normalizedBlockedBy
 	}
 
-	// Handle custom prefix - pre-generate ID if prefix is provided
+	// ID generation is left to Create, which does it while holding the store lock.
+	// Choosing an ID out here would let two concurrent creates settle on the same
+	// sequential number before either had been inserted.
+	var opts []beancore.UpdateOption
 	if input.Prefix != nil && *input.Prefix != "" {
-		idLength := 4 // default
-		if cfg := r.Core.Config(); cfg != nil && cfg.Beans.IDLength > 0 {
-			idLength = cfg.Beans.IDLength
-		}
-		id, err := bean.NewID(*input.Prefix, idLength)
-		if err != nil {
-			return nil, fmt.Errorf("generating bean ID: %w", err)
-		}
-		b.ID = id
+		opts = append(opts, beancore.WithIDPrefix(*input.Prefix))
+	}
+	if input.RandomID != nil && *input.RandomID {
+		opts = append(opts, beancore.WithRandomID())
 	}
 
-	if err := r.Core.Create(b); err != nil {
+	if err := r.Core.Create(b, opts...); err != nil {
 		return nil, err
 	}
 

@@ -357,6 +357,8 @@ type UpdateOption func(*updateOptions)
 type updateOptions struct {
 	persist      bool   // whether to write to disk (default: true)
 	worktreePath string // if set, write to this worktree's .beans/ dir instead of main
+	idPrefix     string // if set, overrides the configured prefix for a generated ID
+	randomID     bool   // if set, generates a random ID whatever the configured mode
 }
 
 func defaultUpdateOptions() updateOptions {
@@ -376,6 +378,23 @@ func WithPersist(persist bool) UpdateOption {
 func WithWorktreePath(path string) UpdateOption {
 	return func(o *updateOptions) {
 		o.worktreePath = path
+	}
+}
+
+// WithIDPrefix overrides the configured prefix when Create generates an ID.
+func WithIDPrefix(prefix string) UpdateOption {
+	return func(o *updateOptions) {
+		o.idPrefix = prefix
+	}
+}
+
+// WithRandomID makes Create generate a random ID even when the project is
+// configured for sequential ones. Use it when a bean is created off to the side of
+// the main board, such as on a branch or by a parallel agent, where a sequential
+// number could be picked twice.
+func WithRandomID() UpdateOption {
+	return func(o *updateOptions) {
+		o.randomID = true
 	}
 }
 
@@ -475,6 +494,47 @@ func (c *Core) SaveBean(id string) error {
 	return nil
 }
 
+// newIDLocked generates an ID for a new bean using the configured mode.
+//
+// The caller must hold c.mu. A sequential ID is chosen by consulting every loaded
+// bean, so releasing the lock between choosing the number and inserting the bean
+// would let two concurrent creates settle on the same one. c.beans covers archived
+// beans as well as active ones, which is what stops an archived number from being
+// issued twice.
+func (c *Core) newIDLocked(prefixOverride string, forceRandom bool) (string, error) {
+	prefix := prefixOverride
+	mode := config.IDModeSequential
+	start, length := 1, 4
+
+	if c.config != nil {
+		if prefix == "" {
+			prefix = c.config.Beans.Prefix
+		}
+		if c.config.Beans.IDMode != "" {
+			mode = c.config.Beans.IDMode
+		}
+		if c.config.Beans.IDStart > 0 {
+			start = c.config.Beans.IDStart
+		}
+		if c.config.Beans.IDLength > 0 {
+			length = c.config.Beans.IDLength
+		}
+	}
+
+	if forceRandom || mode == config.IDModeRandom {
+		id, err := bean.NewID(prefix, length)
+		if err != nil {
+			return "", fmt.Errorf("generating bean ID: %w", err)
+		}
+		return id, nil
+	}
+
+	return bean.NewSequentialID(prefix, start, func(id string) bool {
+		_, exists := c.beans[id]
+		return exists
+	}), nil
+}
+
 // Create adds a new bean, generating an ID if needed.
 // By default, persists to disk. Use WithPersist(false) to only update runtime state.
 func (c *Core) Create(b *bean.Bean, opts ...UpdateOption) error {
@@ -488,17 +548,9 @@ func (c *Core) Create(b *bean.Bean, opts ...UpdateOption) error {
 
 	// Generate ID if not provided
 	if b.ID == "" {
-		prefix := ""
-		length := 4
-		if c.config != nil {
-			prefix = c.config.Beans.Prefix
-			if c.config.Beans.IDLength > 0 {
-				length = c.config.Beans.IDLength
-			}
-		}
-		id, err := bean.NewID(prefix, length)
+		id, err := c.newIDLocked(o.idPrefix, o.randomID)
 		if err != nil {
-			return fmt.Errorf("generating bean ID: %w", err)
+			return err
 		}
 		b.ID = id
 	}

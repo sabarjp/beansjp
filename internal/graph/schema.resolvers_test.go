@@ -805,9 +805,9 @@ func TestMutationCreateBeanWithCustomPrefix(t *testing.T) {
 		if !strings.HasPrefix(got.ID, "SYNC-TASK-") {
 			t.Errorf("CreateBean().ID = %q, want prefix %q", got.ID, "SYNC-TASK-")
 		}
-		// ID should be prefix + 4 chars (default length)
-		if len(got.ID) != len("SYNC-TASK-")+4 {
-			t.Errorf("CreateBean().ID length = %d, want %d", len(got.ID), len("SYNC-TASK-")+4)
+		// Sequential is the default mode, so the prefix carries a number
+		if got.ID != "SYNC-TASK-1" {
+			t.Errorf("CreateBean().ID = %q, want %q", got.ID, "SYNC-TASK-1")
 		}
 	})
 
@@ -820,10 +820,9 @@ func TestMutationCreateBeanWithCustomPrefix(t *testing.T) {
 		if err != nil {
 			t.Fatalf("CreateBean() error = %v", err)
 		}
-		// Without custom prefix, should use config default (empty in test setup)
-		// ID should just be 4 chars
-		if len(got.ID) != 4 {
-			t.Errorf("CreateBean().ID length = %d, want 4", len(got.ID))
+		// Config prefix is empty in the test setup, leaving a bare number
+		if got.ID != "1" {
+			t.Errorf("CreateBean().ID = %q, want %q", got.ID, "1")
 		}
 	})
 
@@ -839,8 +838,24 @@ func TestMutationCreateBeanWithCustomPrefix(t *testing.T) {
 			t.Fatalf("CreateBean() error = %v", err)
 		}
 		// Empty string prefix should fall back to config default
+		if got.ID != "2" {
+			t.Errorf("CreateBean().ID = %q, want %q", got.ID, "2")
+		}
+	})
+
+	t.Run("randomId input opts out of sequential numbering", func(t *testing.T) {
+		mr := resolver.Mutation()
+		randomID := true
+		input := model.CreateBeanInput{
+			Title:    "Random ID Bean",
+			RandomID: &randomID,
+		}
+		got, err := mr.CreateBean(ctx, input)
+		if err != nil {
+			t.Fatalf("CreateBean() error = %v", err)
+		}
 		if len(got.ID) != 4 {
-			t.Errorf("CreateBean().ID length = %d, want 4", len(got.ID))
+			t.Errorf("CreateBean().ID = %q, want a 4-character random ID", got.ID)
 		}
 	})
 }

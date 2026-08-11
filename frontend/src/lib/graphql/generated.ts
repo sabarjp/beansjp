@@ -319,6 +319,8 @@ export type CreateBeanInput = {
   prefix?: InputMaybe<Scalars['String']['input']>;
   /** Priority level (defaults to 'normal') */
   priority?: InputMaybe<Scalars['String']['input']>;
+  /** Give this bean a random ID even when the project is configured for sequential IDs */
+  randomId?: InputMaybe<Scalars['Boolean']['input']>;
   /** Status (defaults to 'todo') */
   status?: InputMaybe<Scalars['String']['input']>;
   /** Tags for categorization */

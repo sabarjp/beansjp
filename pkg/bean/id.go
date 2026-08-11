@@ -3,6 +3,7 @@ package bean
 import (
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 	"unicode"
 
@@ -54,6 +55,30 @@ func NewID(prefix string, length int) (string, error) {
 		}
 		if !containsBlockedWord(id) {
 			return prefix + id, nil
+		}
+	}
+}
+
+// NewSequentialID returns prefix + the lowest number at or above start that no
+// existing bean already uses, as reported by taken.
+//
+// Numbers are skipped rather than assumed free, because a board can hold ids that
+// look sequential without having been issued sequentially: a random id drawn from
+// the [0-9a-z] alphabet is all digits roughly one time in 130, and any board that
+// switched modes holds both kinds. Probing upward from start keeps numbering where
+// the project asked for it, instead of letting one stray numeric-looking random id
+// push every future id above it.
+//
+// Callers must pass a taken predicate covering archived beans as well as active
+// ones, or archived numbers get handed out a second time.
+func NewSequentialID(prefix string, start int, taken func(id string) bool) string {
+	if start < 1 {
+		start = 1
+	}
+	for n := start; ; n++ {
+		id := prefix + strconv.Itoa(n)
+		if !taken(id) {
+			return id
 		}
 	}
 }

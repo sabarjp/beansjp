@@ -169,8 +169,57 @@ func TestCreateGeneratesID(t *testing.T) {
 	if b.ID == "" {
 		t.Error("ID was not generated")
 	}
-	if len(b.ID) != 4 { // Default ID length
-		t.Errorf("ID length = %d, want 4", len(b.ID))
+	if b.ID != "1" { // Sequential is the default mode
+		t.Errorf("ID = %q, want %q", b.ID, "1")
+	}
+
+	second := &bean.Bean{Title: "Second Auto ID Bean", Status: "todo"}
+	if err := core.Create(second); err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	if second.ID != "2" {
+		t.Errorf("second ID = %q, want %q", second.ID, "2")
+	}
+}
+
+func TestCreateWithRandomIDOption(t *testing.T) {
+	core, _ := setupTestCore(t)
+
+	b := &bean.Bean{Title: "Random ID Bean", Status: "todo"}
+	if err := core.Create(b, WithRandomID()); err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	if len(b.ID) != 4 { // Default random suffix length
+		t.Errorf("ID = %q, want a 4-character random ID", b.ID)
+	}
+
+	// A random ID must not consume a sequential number.
+	next := &bean.Bean{Title: "Next Sequential Bean", Status: "todo"}
+	if err := core.Create(next); err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	if next.ID != "1" {
+		t.Errorf("next sequential ID = %q, want %q", next.ID, "1")
+	}
+}
+
+func TestCreateSequentialIDSkipsArchivedNumbers(t *testing.T) {
+	core, _ := setupTestCore(t)
+
+	first := &bean.Bean{Title: "Will Be Archived", Status: "todo"}
+	if err := core.Create(first); err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	if err := core.Archive(first.ID); err != nil {
+		t.Fatalf("Archive() error = %v", err)
+	}
+
+	next := &bean.Bean{Title: "Created After Archiving", Status: "todo"}
+	if err := core.Create(next); err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	if next.ID == first.ID {
+		t.Errorf("archived ID %q was handed out again", next.ID)
 	}
 }
 
