@@ -4,10 +4,12 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -34,8 +36,29 @@ import (
 
 var (
 	servePort    int
+	serveHost    string
 	corsOrigins  []string
 )
+
+// DefaultServeHost is the interface the server binds to unless --host says otherwise.
+//
+// Loopback is the only safe default: the server has no authentication, and its API
+// can start agent sessions that run with permission prompts disabled. Binding every
+// interface would let anyone who can reach the port run code in this repository.
+const DefaultServeHost = "127.0.0.1"
+
+// isLoopbackHost reports whether binding to host keeps the server on this machine.
+// An empty host means "every interface" to net.Listen, so it is not loopback.
+func isLoopbackHost(host string) bool {
+	if host == "" {
+		return false
+	}
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
 
 const centralAgentPrompt = `You are the planning agent for this project. Your primary role is to help manage and organize work through beans (issues).
 
@@ -396,7 +419,11 @@ func runServer(port int, origins []string) error {
 	router.NoRoute(gin.WrapH(web.Handler()))
 
 	// Create HTTP server
-	addr := fmt.Sprintf(":%d", port)
+	host := serveHost
+	if host == "" {
+		host = DefaultServeHost
+	}
+	addr := net.JoinHostPort(host, strconv.Itoa(port))
 	server := &http.Server{
 		Addr:         addr,
 		Handler:      router,
@@ -414,9 +441,14 @@ func runServer(port int, origins []string) error {
 
 	// Start server in goroutine
 	go func() {
-		fmt.Printf("[beans] Starting server at http://localhost:%d/\n", port)
-		fmt.Printf("[beans] GraphQL Playground: http://localhost:%d/playground\n", port)
+		fmt.Printf("[beans] Starting server at http://%s/\n", addr)
+		fmt.Printf("[beans] GraphQL Playground: http://%s/playground\n", addr)
 		fmt.Printf("[beans] Allowed origins: %s\n", strings.Join(origins, ", "))
+		if !isLoopbackHost(host) {
+			fmt.Printf("[beans] WARNING: listening on %s, which is reachable from other machines.\n", host)
+			fmt.Printf("[beans]          There is no authentication, and the API can start agent\n")
+			fmt.Printf("[beans]          sessions that run with permission prompts disabled.\n")
+		}
 		serverErr <- server.ListenAndServe()
 	}()
 
@@ -455,6 +487,7 @@ func runServer(port int, origins []string) error {
 
 func RegisterServeCmd(root *cobra.Command) {
 	serveCmd.Flags().IntVarP(&servePort, "port", "p", config.DefaultServerPort, "Port to listen on")
+	serveCmd.Flags().StringVar(&serveHost, "host", DefaultServeHost, "Address to bind (use 0.0.0.0 to accept connections from other machines)")
 	serveCmd.Flags().StringSliceVar(&corsOrigins, "cors-origin", cors.DefaultOrigins, "Allowed CORS origins (use * to allow all)")
 	root.AddCommand(serveCmd)
 }
