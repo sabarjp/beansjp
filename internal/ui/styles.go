@@ -347,25 +347,30 @@ func RenderPrioritySymbol(priority, color string) string {
 
 // BeanRowConfig holds configuration for rendering a bean row
 type BeanRowConfig struct {
-	StatusColor   string
-	TypeColor     string
-	PriorityColor string
-	Priority      string // Priority value (critical, high, normal, low, deferred)
-	IsArchive     bool
-	MaxTitleWidth int  // 0 means no truncation
-	ShowCursor    bool // Show selection cursor
-	IsSelected    bool
-	IsMarked      bool     // Marked for multi-select batch operations
-	Tags          []string // Tags to display (optional)
-	ShowTags      bool     // Whether to show tags column
-	TagsColWidth  int      // Width of tags column (0 = default)
-	MaxTags       int      // Max tags to show (0 = default of 1)
-	TreePrefix      string   // Tree prefix (e.g., "├─" or "  └─") to prepend to ID
-	Dimmed          bool     // Render row dimmed (for unmatched ancestor beans in tree)
-	IDColWidth      int      // Width of ID column (0 = default of ColWidthID)
-	UseFullNames    bool     // Use full type/status names instead of single-char abbreviations
+	StatusColor    string
+	TypeColor      string
+	PriorityColor  string
+	Priority       string // Priority value (critical, high, normal, low, deferred)
+	IsArchive      bool
+	MaxTitleWidth  int  // 0 means no truncation
+	ShowCursor     bool // Show selection cursor
+	IsSelected     bool
+	IsMarked       bool     // Marked for multi-select batch operations
+	Tags           []string // Tags to display (optional)
+	ShowTags       bool     // Whether to show tags column
+	TagsColWidth   int      // Width of tags column (0 = default)
+	MaxTags        int      // Max tags to show (0 = default of 1)
+	TreePrefix     string   // Tree prefix (e.g., "├─" or "  └─") to prepend to ID
+	Dimmed         bool     // Render row dimmed (for unmatched ancestor beans in tree)
+	IDColWidth     int      // Width of ID column (0 = default of ColWidthID)
+	UseFullNames   bool     // Use full type/status names instead of single-char abbreviations
 	ImplicitStatus string   // Implicit terminal status from an ancestor (e.g., "scrapped")
 }
+
+// minTitleWidthForImplicit is the minimum number of title characters that must
+// remain after reserving room for the "↑<status>" annotation. Below this, the
+// annotation is dropped rather than squeezing the title out of existence.
+const minTitleWidthForImplicit = 4
 
 // Base column widths for bean lists (minimum sizes)
 const (
@@ -373,6 +378,11 @@ const (
 	ColWidthStatus = 3
 	ColWidthType   = 3
 	ColWidthTags   = 24
+
+	// Widths used when rendering full type/status names instead of the
+	// single-character abbreviations.
+	ColWidthFullStatus = 12 // "in-progress" needs 11 chars
+	ColWidthFullType   = 12 // "milestone" needs 9 chars
 )
 
 // ResponsiveColumns holds calculated column widths based on available space
@@ -381,7 +391,7 @@ type ResponsiveColumns struct {
 	Status            int
 	Type              int
 	Tags              int
-	MaxTags           int  // How many tags to show
+	MaxTags           int // How many tags to show
 	ShowTags          bool
 	UseFullTypeStatus bool // Use full names instead of single-char abbreviations
 }
@@ -402,8 +412,9 @@ func CalculateResponsiveColumns(totalWidth int, hasTags bool) ResponsiveColumns 
 	const minWidthForFullNames = 120
 	if totalWidth >= minWidthForFullNames {
 		cols.UseFullTypeStatus = true
-		cols.Status = 12 // "in-progress" needs 11 chars
-		cols.Type = 10   // "milestone" needs 9 chars
+		// These must match the widths RenderBeanRow uses for full names.
+		cols.Status = ColWidthFullStatus
+		cols.Type = ColWidthFullType
 	}
 
 	// Don't show tags in narrow viewports - prioritize title space
@@ -499,7 +510,7 @@ func RenderBeanRow(id, status, typeName, title string, cfg BeanRowConfig) string
 	var typeStr string
 	if cfg.UseFullNames {
 		typeStr = typeName
-		typeStyle = typeStyle.Width(12) // wider for full names
+		typeStyle = typeStyle.Width(ColWidthFullType) // wider for full names
 	} else {
 		typeStr = ShortType(typeName)
 	}
@@ -514,7 +525,7 @@ func RenderBeanRow(id, status, typeName, title string, cfg BeanRowConfig) string
 	var statusStr string
 	if cfg.UseFullNames {
 		statusStr = status
-		statusStyle = statusStyle.Width(12) // wider for full names
+		statusStyle = statusStyle.Width(ColWidthFullStatus) // wider for full names
 	} else {
 		statusStr = ShortStatus(status)
 	}
@@ -548,17 +559,39 @@ func RenderBeanRow(id, status, typeName, title string, cfg BeanRowConfig) string
 		}
 	}
 
-	// Title (truncate if needed, accounting for priority symbol width)
+	// Implicit status annotation (muted suffix, only when not dimmed).
+	// It lives inside the title column so it never pushes the row past the
+	// terminal width (which would wrap the line).
+	var implicitAnnotation string
+	implicitWidth := 0
+	if cfg.ImplicitStatus != "" && !cfg.Dimmed {
+		annotation := " ↑" + cfg.ImplicitStatus
+		implicitAnnotation = Muted.Render(annotation)
+		implicitWidth = len([]rune(annotation))
+	}
+
+	// Title (truncate if needed, accounting for priority symbol and annotation width)
 	displayTitle := title
 	titleColWidth := cfg.MaxTitleWidth // Save original for padding
 	maxWidth := cfg.MaxTitleWidth
 	if maxWidth > 0 && prioritySymbol != "" {
 		maxWidth -= 2 // Account for symbol + space
 	}
-	if maxWidth > 3 && len(title) > maxWidth {
-		displayTitle = title[:maxWidth-3] + "..."
-	} else if maxWidth > 0 && maxWidth <= 3 && len(title) > maxWidth {
-		displayTitle = title[:maxWidth]
+	if maxWidth > 0 && implicitWidth > 0 {
+		// Drop the annotation entirely if reserving room for it would leave
+		// no meaningful title behind.
+		if maxWidth-implicitWidth < minTitleWidthForImplicit {
+			implicitAnnotation = ""
+			implicitWidth = 0
+		} else {
+			maxWidth -= implicitWidth
+		}
+	}
+	titleRunes := []rune(title)
+	if maxWidth > 3 && len(titleRunes) > maxWidth {
+		displayTitle = string(titleRunes[:maxWidth-3]) + "..."
+	} else if maxWidth > 0 && maxWidth <= 3 && len(titleRunes) > maxWidth {
+		displayTitle = string(titleRunes[:maxWidth])
 	}
 
 	// Cursor and title styling
@@ -585,16 +618,10 @@ func RenderBeanRow(id, status, typeName, title string, cfg BeanRowConfig) string
 		}
 	}
 
-	// Implicit status annotation (muted suffix, only when not dimmed)
-	var implicitAnnotation string
-	if cfg.ImplicitStatus != "" && !cfg.Dimmed {
-		implicitAnnotation = Muted.Render(" ↑" + cfg.ImplicitStatus)
-	}
-
 	if cfg.ShowTags {
 		// Pad title column to fixed width so tags align in a column
-		// Calculate padding needed: titleColWidth - (priority symbol width + title length)
-		titleLen := len(displayTitle)
+		// Calculate padding needed: titleColWidth - (priority symbol + title + annotation width)
+		titleLen := len([]rune(displayTitle)) + implicitWidth
 		if prioritySymbol != "" {
 			titleLen += 2 // symbol + space
 		}
@@ -602,7 +629,7 @@ func RenderBeanRow(id, status, typeName, title string, cfg BeanRowConfig) string
 		if titleColWidth > titleLen {
 			padding = strings.Repeat(" ", titleColWidth-titleLen)
 		}
-		return cursor + idCol + " " + typeCol + " " + statusCol + " " + prioritySymbol + titleStyled + padding + " " + tagsCol + implicitAnnotation
+		return cursor + idCol + " " + typeCol + " " + statusCol + " " + prioritySymbol + titleStyled + implicitAnnotation + padding + " " + tagsCol
 	}
 	return cursor + idCol + " " + typeCol + " " + statusCol + " " + prioritySymbol + titleStyled + implicitAnnotation
 }

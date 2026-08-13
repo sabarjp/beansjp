@@ -62,7 +62,7 @@ func (d itemDelegate) Render(w io.Writer, m list.Model, index int, listItem list
 	}
 	baseWidth := idWidth + d.cols.Status + d.cols.Type + 4 // 4 for cursor + padding
 	if d.cols.ShowTags {
-		baseWidth += d.cols.Tags
+		baseWidth += d.cols.Tags + 1 // +1 for the space between title and tags columns
 	}
 	maxTitleWidth := max(0, m.Width()-baseWidth)
 
