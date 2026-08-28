@@ -145,8 +145,13 @@ type listModel struct {
 	autoFolded    map[string]bool // last computed automatic fold state
 	showFold      bool            // whether the fold marker column is reserved
 
-	// Bean ID to re-select after the next reload (used when folding moves rows)
-	pendingSelectID string
+	// Folds are suspended while a text filter is active: folded-away children
+	// are absent from the list, so the filter could never match them.
+	foldsSuspended bool
+
+	// Beans to re-select after the next reload, best match first: the bean the
+	// cursor was on, then its ancestors, in case it is folded away
+	pendingSelectIDs []string
 
 	// Status message to display in footer
 	statusMessage string
@@ -282,6 +287,9 @@ func (m listModel) loadBeans() tea.Msg {
 // effectiveFolds combines the automatic fold state with the user's explicit
 // toggles, which always win.
 func (m listModel) effectiveFolds(autoFolded map[string]bool) map[string]bool {
+	if m.foldsSuspended {
+		return nil
+	}
 	folds := make(map[string]bool, len(autoFolded)+len(m.foldOverrides))
 	for id, folded := range autoFolded {
 		folds[id] = folded
@@ -304,8 +312,36 @@ func (m listModel) isFolded(beanID string) bool {
 // keeping the cursor on that bean.
 func (m *listModel) setFold(beanID string, folded bool) tea.Cmd {
 	m.foldOverrides[beanID] = folded
-	m.pendingSelectID = beanID
+	m.pendingSelectIDs = []string{beanID}
 	return m.loadBeans
+}
+
+// rememberSelection records a bean and its ancestors so the cursor can be
+// restored after a reload, even if the bean itself ends up folded away.
+func (m *listModel) rememberSelection(beanID string) {
+	if beanID == "" {
+		return
+	}
+
+	// Walk the full item set, not just the visible one: under an active filter
+	// the ancestors are usually filtered out
+	byID := make(map[string]*bean.Bean)
+	for _, listItem := range m.list.Items() {
+		if bi, ok := listItem.(beanItem); ok {
+			byID[bi.bean.ID] = bi.bean
+		}
+	}
+
+	ids := []string{beanID}
+	for b := byID[beanID]; b != nil && b.Parent != ""; {
+		parent, ok := byID[b.Parent]
+		if !ok {
+			break
+		}
+		ids = append(ids, parent.ID)
+		b = parent
+	}
+	m.pendingSelectIDs = ids
 }
 
 // setTagFilter sets the tag filter
@@ -328,7 +364,10 @@ func (m listModel) Update(msg tea.Msg) (listModel, tea.Cmd) {
 	var cmds []tea.Cmd
 
 	// Track cursor position before update
-	prevIndex := m.list.Index()
+	prevSelectedID := ""
+	if item, ok := m.list.SelectedItem().(beanItem); ok {
+		prevSelectedID = item.bean.ID
+	}
 
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
@@ -359,7 +398,9 @@ func (m listModel) Update(msg tea.Msg) (listModel, tea.Cmd) {
 				m.hasTags = true
 			}
 		}
-		m.list.SetItems(items)
+		// SetItems returns a command that re-runs an active filter over the
+		// new items; it must be forwarded or the filtered view goes stale.
+		setItemsCmd := m.list.SetItems(items)
 		m.autoFolded = msg.autoFolded
 		m.showFold = msg.showFold
 		m.idColWidth = msg.idColWidth
@@ -367,7 +408,7 @@ func (m listModel) Update(msg tea.Msg) (listModel, tea.Cmd) {
 		// Calculate responsive columns based on hasTags and width
 		m.cols = ui.CalculateResponsiveColumns(m.width, m.hasTags)
 		m.updateDelegate()
-		return m, nil
+		return m, setItemsCmd
 
 	case errMsg:
 		m.err = msg.err
@@ -378,12 +419,18 @@ func (m listModel) Update(msg tea.Msg) (listModel, tea.Cmd) {
 			switch msg.String() {
 			case "tab":
 				// Toggle fold on the selected bean
+				if m.foldsSuspended {
+					return m, nil
+				}
 				if item, ok := m.list.SelectedItem().(beanItem); ok && item.hasChildren {
 					return m, m.setFold(item.bean.ID, !m.isFolded(item.bean.ID))
 				}
 				return m, nil
 			case "left", "h":
 				// Fold the selected bean, or jump to its parent if already folded
+				if m.foldsSuspended {
+					return m, nil
+				}
 				if item, ok := m.list.SelectedItem().(beanItem); ok {
 					if item.hasChildren && !m.isFolded(item.bean.ID) {
 						return m, m.setFold(item.bean.ID, true)
@@ -395,6 +442,9 @@ func (m listModel) Update(msg tea.Msg) (listModel, tea.Cmd) {
 				return m, nil
 			case "right", "l":
 				// Unfold the selected bean, or step into its first child
+				if m.foldsSuspended {
+					return m, nil
+				}
 				if item, ok := m.list.SelectedItem().(beanItem); ok && item.hasChildren {
 					if m.isFolded(item.bean.ID) {
 						return m, m.setFold(item.bean.ID, false)
@@ -587,13 +637,21 @@ func (m listModel) Update(msg tea.Msg) (listModel, tea.Cmd) {
 		cmds = append(cmds, cmd)
 	}
 
-	// Check if cursor moved and emit message
-	if m.list.Index() != prevIndex {
-		if item, ok := m.list.SelectedItem().(beanItem); ok {
-			cmds = append(cmds, func() tea.Msg {
-				return cursorChangedMsg{beanID: item.bean.ID}
-			})
-		}
+	// Entering or leaving the filter changes whether folds apply, so the
+	// item list has to be rebuilt
+	if suspended := m.list.FilterState() != list.Unfiltered; suspended != m.foldsSuspended {
+		m.foldsSuspended = suspended
+		// Use the pre-update selection: resetting the filter has already moved
+		// the cursor by the time we get here
+		m.rememberSelection(prevSelectedID)
+		cmds = append(cmds, m.loadBeans)
+	}
+
+	// Check if the selection moved and emit message
+	if item, ok := m.list.SelectedItem().(beanItem); ok && item.bean.ID != prevSelectedID {
+		cmds = append(cmds, func() tea.Msg {
+			return cursorChangedMsg{beanID: item.bean.ID}
+		})
 	}
 
 	return m, tea.Batch(cmds...)
@@ -613,7 +671,8 @@ func (m listModel) cursorChangedCmd() tea.Cmd {
 
 // selectBeanID moves the cursor to the given bean if it is currently visible.
 func (m *listModel) selectBeanID(beanID string) bool {
-	for i, item := range m.list.Items() {
+	// Indices are relative to the visible (possibly filtered) items
+	for i, item := range m.list.VisibleItems() {
 		if bi, ok := item.(beanItem); ok && bi.bean.ID == beanID {
 			m.list.Select(i)
 			return true
@@ -622,13 +681,15 @@ func (m *listModel) selectBeanID(beanID string) bool {
 	return false
 }
 
-// restoreSelection re-selects the bean the cursor was on before a reload.
+// restoreSelection re-selects the bean the cursor was on before a reload,
+// falling back to its nearest visible ancestor.
 func (m *listModel) restoreSelection() {
-	if m.pendingSelectID == "" {
-		return
+	for _, id := range m.pendingSelectIDs {
+		if m.selectBeanID(id) {
+			break
+		}
 	}
-	m.selectBeanID(m.pendingSelectID)
-	m.pendingSelectID = ""
+	m.pendingSelectIDs = nil
 }
 
 // updateDelegate updates the list delegate with current responsive columns

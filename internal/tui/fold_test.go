@@ -59,7 +59,35 @@ func TestSetFoldRecordsOverrideAndPendingSelection(t *testing.T) {
 	if !m.foldOverrides["e1"] {
 		t.Error("e1: expected fold override to be recorded")
 	}
-	if m.pendingSelectID != "e1" {
-		t.Errorf("pendingSelectID = %q, want %q", m.pendingSelectID, "e1")
+	if len(m.pendingSelectIDs) != 1 || m.pendingSelectIDs[0] != "e1" {
+		t.Errorf("pendingSelectIDs = %v, want [e1]", m.pendingSelectIDs)
+	}
+}
+
+func TestEffectiveFoldsSuspendedWhileFiltering(t *testing.T) {
+	m := newFoldTestModel()
+	m.foldOverrides["m1"] = true
+	m.foldsSuspended = true
+
+	// Folded children must be present in the list for the filter to match them
+	if folds := m.effectiveFolds(map[string]bool{"e2": true}); len(folds) != 0 {
+		t.Errorf("expected no folds while filtering, got %v", folds)
+	}
+
+	m.foldsSuspended = false
+	if folds := m.effectiveFolds(map[string]bool{"e2": true}); !folds["e2"] || !folds["m1"] {
+		t.Errorf("expected folds to return once filtering ends, got %v", folds)
+	}
+}
+
+func TestRestoreSelectionKeepsOverrides(t *testing.T) {
+	m := newFoldTestModel()
+	m.pendingSelectIDs = []string{"t1", "e1", "m1"}
+
+	// No items are loaded, so nothing matches; the request must still be cleared
+	m.restoreSelection()
+
+	if m.pendingSelectIDs != nil {
+		t.Errorf("pendingSelectIDs = %v, want nil", m.pendingSelectIDs)
 	}
 }
