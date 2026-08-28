@@ -5,23 +5,27 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/hmans/beans/internal/ui"
 	"github.com/hmans/beans/pkg/bean"
-	"github.com/hmans/beans/pkg/config"
 	"github.com/hmans/beans/pkg/beangraph"
 	"github.com/hmans/beans/pkg/beangraph/model"
-	"github.com/hmans/beans/internal/ui"
+	"github.com/hmans/beans/pkg/config"
 )
 
 // beanItem wraps a Bean to implement list.Item, with tree context
 type beanItem struct {
-	bean            *bean.Bean
-	cfg             *config.Config
-	treePrefix      string // tree prefix for rendering (e.g., "├─" or "  └─")
-	matched         bool   // true if bean matched filter (vs. ancestor shown for context)
+	bean           *bean.Bean
+	cfg            *config.Config
+	treePrefix     string // tree prefix for rendering (e.g., "├─" or "  └─")
+	matched        bool   // true if bean matched filter (vs. ancestor shown for context)
 	implicitStatus string // implicit terminal status from an ancestor, if any
+	hasChildren    bool   // true if this bean has children (foldable)
+	collapsed      bool   // true if this bean's children are folded away
+	hiddenCount    int    // number of descendants hidden by the fold
 }
 
 func (i beanItem) Title() string       { return i.bean.Title }
@@ -35,6 +39,7 @@ type itemDelegate struct {
 	width         int
 	cols          ui.ResponsiveColumns // cached responsive columns
 	idColWidth    int                  // ID column width (accounts for tree prefix)
+	showFold      bool                 // whether to render the fold marker column
 	selectedBeans *map[string]bool     // pointer to marked beans for multi-select
 }
 
@@ -72,29 +77,41 @@ func (d itemDelegate) Render(w io.Writer, m list.Model, index int, listItem list
 		isMarked = (*d.selectedBeans)[item.bean.ID]
 	}
 
+	// Fold marker sits in a fixed-width column between the tree connector and
+	// the ID, so leaf and parent rows stay aligned.
+	treePrefix := item.treePrefix
+	if d.showFold {
+		treePrefix += ui.FoldMarker(item.hasChildren, item.collapsed)
+	}
+
+	title := item.bean.Title
+	if item.collapsed && item.hiddenCount > 0 {
+		title = fmt.Sprintf("%s (+%d)", title, item.hiddenCount)
+	}
+
 	str := ui.RenderBeanRow(
 		item.bean.ID,
 		item.bean.Status,
 		item.bean.Type,
-		item.bean.Title,
+		title,
 		ui.BeanRowConfig{
-			StatusColor:     colors.StatusColor,
-			TypeColor:       colors.TypeColor,
-			PriorityColor:   colors.PriorityColor,
-			Priority:        item.bean.Priority,
-			IsArchive:       colors.IsArchive,
-			MaxTitleWidth:   maxTitleWidth,
-			ShowCursor:      true,
-			IsSelected:      index == m.Index(),
-			IsMarked:        isMarked,
-			Tags:            item.bean.Tags,
-			ShowTags:        d.cols.ShowTags,
-			TagsColWidth:    d.cols.Tags,
-			MaxTags:         d.cols.MaxTags,
-			TreePrefix:      item.treePrefix,
-			Dimmed:          !item.matched,
-			IDColWidth:      d.idColWidth,
-			UseFullNames:    d.cols.UseFullTypeStatus,
+			StatusColor:    colors.StatusColor,
+			TypeColor:      colors.TypeColor,
+			PriorityColor:  colors.PriorityColor,
+			Priority:       item.bean.Priority,
+			IsArchive:      colors.IsArchive,
+			MaxTitleWidth:  maxTitleWidth,
+			ShowCursor:     true,
+			IsSelected:     index == m.Index(),
+			IsMarked:       isMarked,
+			Tags:           item.bean.Tags,
+			ShowTags:       d.cols.ShowTags,
+			TagsColWidth:   d.cols.Tags,
+			MaxTags:        d.cols.MaxTags,
+			TreePrefix:     treePrefix,
+			Dimmed:         !item.matched,
+			IDColWidth:     d.idColWidth,
+			UseFullNames:   d.cols.UseFullTypeStatus,
 			ImplicitStatus: item.implicitStatus,
 		},
 	)
@@ -122,6 +139,15 @@ type listModel struct {
 	// Multi-select state
 	selectedBeans map[string]bool // IDs of beans marked for multi-edit
 
+	// Fold state: explicit user overrides (true = folded) keyed by bean ID.
+	// Parents not listed here use the automatic fold state (see ui.AutoCollapsed).
+	foldOverrides map[string]bool
+	autoFolded    map[string]bool // last computed automatic fold state
+	showFold      bool            // whether the fold marker column is reserved
+
+	// Bean ID to re-select after the next reload (used when folding moves rows)
+	pendingSelectID string
+
 	// Status message to display in footer
 	statusMessage string
 }
@@ -140,18 +166,32 @@ func newListModel(resolver *beangraph.CoreResolver, cfg *config.Config) listMode
 	l.Styles.FilterPrompt = lipgloss.NewStyle().Foreground(ui.ColorPrimary)
 	l.Styles.FilterCursor = lipgloss.NewStyle().Foreground(ui.ColorPrimary)
 
+	// Left/right (and h/l) drive folding instead of list pagination
+	l.KeyMap.NextPage = key.NewBinding(
+		key.WithKeys("pgdown", "f", "d"),
+		key.WithHelp("pgdn", "next page"),
+	)
+	l.KeyMap.PrevPage = key.NewBinding(
+		key.WithKeys("pgup", "u"),
+		key.WithHelp("pgup", "prev page"),
+	)
+
 	return listModel{
 		list:          l,
 		resolver:      resolver,
 		config:        cfg,
 		selectedBeans: selectedBeans,
+		foldOverrides: make(map[string]bool),
+		autoFolded:    make(map[string]bool),
 	}
 }
 
 // beansLoadedMsg is sent when beans are loaded
 type beansLoadedMsg struct {
-	items      []ui.FlatItem // flattened tree items
-	idColWidth int           // calculated ID column width for tree
+	items      []ui.FlatItem   // flattened tree items
+	idColWidth int             // calculated ID column width for tree
+	autoFolded map[string]bool // parents folded automatically (all descendants done)
+	showFold   bool            // whether to reserve the fold marker column
 }
 
 // errMsg is sent when an error occurs
@@ -200,9 +240,10 @@ func (m listModel) loadBeans() tea.Msg {
 		}
 	}
 
-	// Build tree and flatten it
+	// Build tree, fold what should be folded, then flatten it
 	tree := ui.BuildTree(filteredBeans, allBeans, sortFn, implicitStatuses)
-	items := ui.FlattenTree(tree)
+	autoFolded := ui.AutoCollapsed(tree, m.config.IsArchiveStatus)
+	items := ui.FlattenTreeCollapsed(tree, m.effectiveFolds(autoFolded))
 
 	// Calculate ID column width based on max ID length and tree depth
 	maxIDLen := 0
@@ -218,7 +259,53 @@ func (m listModel) loadBeans() tea.Msg {
 		idColWidth += maxDepth * 3 // 3 chars per depth level (├─ + space)
 	}
 
-	return beansLoadedMsg{items: items, idColWidth: idColWidth}
+	// Reserve the fold marker column only when something is actually foldable
+	showFold := false
+	for _, item := range items {
+		if item.HasChildren {
+			showFold = true
+			break
+		}
+	}
+	if showFold {
+		idColWidth += ui.FoldMarkerWidth
+	}
+
+	return beansLoadedMsg{
+		items:      items,
+		idColWidth: idColWidth,
+		autoFolded: autoFolded,
+		showFold:   showFold,
+	}
+}
+
+// effectiveFolds combines the automatic fold state with the user's explicit
+// toggles, which always win.
+func (m listModel) effectiveFolds(autoFolded map[string]bool) map[string]bool {
+	folds := make(map[string]bool, len(autoFolded)+len(m.foldOverrides))
+	for id, folded := range autoFolded {
+		folds[id] = folded
+	}
+	for id, folded := range m.foldOverrides {
+		folds[id] = folded
+	}
+	return folds
+}
+
+// isFolded reports the current fold state of a bean.
+func (m listModel) isFolded(beanID string) bool {
+	if folded, ok := m.foldOverrides[beanID]; ok {
+		return folded
+	}
+	return m.autoFolded[beanID]
+}
+
+// setFold records an explicit fold state for a bean and reloads the list,
+// keeping the cursor on that bean.
+func (m *listModel) setFold(beanID string, folded bool) tea.Cmd {
+	m.foldOverrides[beanID] = folded
+	m.pendingSelectID = beanID
+	return m.loadBeans
 }
 
 // setTagFilter sets the tag filter
@@ -259,18 +346,24 @@ func (m listModel) Update(msg tea.Msg) (listModel, tea.Cmd) {
 		m.hasTags = false
 		for i, flatItem := range msg.items {
 			items[i] = beanItem{
-				bean:            flatItem.Bean,
-				cfg:             m.config,
-				treePrefix:      flatItem.TreePrefix,
-				matched:         flatItem.Matched,
+				bean:           flatItem.Bean,
+				cfg:            m.config,
+				treePrefix:     flatItem.TreePrefix,
+				matched:        flatItem.Matched,
 				implicitStatus: flatItem.ImplicitStatus,
+				hasChildren:    flatItem.HasChildren && msg.showFold,
+				collapsed:      flatItem.Collapsed,
+				hiddenCount:    flatItem.HiddenCount,
 			}
 			if len(flatItem.Bean.Tags) > 0 {
 				m.hasTags = true
 			}
 		}
 		m.list.SetItems(items)
+		m.autoFolded = msg.autoFolded
+		m.showFold = msg.showFold
 		m.idColWidth = msg.idColWidth
+		m.restoreSelection()
 		// Calculate responsive columns based on hasTags and width
 		m.cols = ui.CalculateResponsiveColumns(m.width, m.hasTags)
 		m.updateDelegate()
@@ -283,6 +376,33 @@ func (m listModel) Update(msg tea.Msg) (listModel, tea.Cmd) {
 	case tea.KeyMsg:
 		if m.list.FilterState() != list.Filtering {
 			switch msg.String() {
+			case "tab":
+				// Toggle fold on the selected bean
+				if item, ok := m.list.SelectedItem().(beanItem); ok && item.hasChildren {
+					return m, m.setFold(item.bean.ID, !m.isFolded(item.bean.ID))
+				}
+				return m, nil
+			case "left", "h":
+				// Fold the selected bean, or jump to its parent if already folded
+				if item, ok := m.list.SelectedItem().(beanItem); ok {
+					if item.hasChildren && !m.isFolded(item.bean.ID) {
+						return m, m.setFold(item.bean.ID, true)
+					}
+					if item.bean.Parent != "" && m.selectBeanID(item.bean.Parent) {
+						return m, m.cursorChangedCmd()
+					}
+				}
+				return m, nil
+			case "right", "l":
+				// Unfold the selected bean, or step into its first child
+				if item, ok := m.list.SelectedItem().(beanItem); ok && item.hasChildren {
+					if m.isFolded(item.bean.ID) {
+						return m, m.setFold(item.bean.ID, false)
+					}
+					m.list.CursorDown()
+					return m, m.cursorChangedCmd()
+				}
+				return m, nil
 			case " ":
 				// Toggle selection for multi-select, then move to next item
 				if item, ok := m.list.SelectedItem().(beanItem); ok {
@@ -479,6 +599,38 @@ func (m listModel) Update(msg tea.Msg) (listModel, tea.Cmd) {
 	return m, tea.Batch(cmds...)
 }
 
+// cursorChangedCmd emits a cursorChangedMsg for the currently selected bean,
+// so views following the cursor (like the preview pane) stay in sync.
+func (m listModel) cursorChangedCmd() tea.Cmd {
+	item, ok := m.list.SelectedItem().(beanItem)
+	if !ok {
+		return nil
+	}
+	return func() tea.Msg {
+		return cursorChangedMsg{beanID: item.bean.ID}
+	}
+}
+
+// selectBeanID moves the cursor to the given bean if it is currently visible.
+func (m *listModel) selectBeanID(beanID string) bool {
+	for i, item := range m.list.Items() {
+		if bi, ok := item.(beanItem); ok && bi.bean.ID == beanID {
+			m.list.Select(i)
+			return true
+		}
+	}
+	return false
+}
+
+// restoreSelection re-selects the bean the cursor was on before a reload.
+func (m *listModel) restoreSelection() {
+	if m.pendingSelectID == "" {
+		return
+	}
+	m.selectBeanID(m.pendingSelectID)
+	m.pendingSelectID = ""
+}
+
 // updateDelegate updates the list delegate with current responsive columns
 func (m *listModel) updateDelegate() {
 	delegate := itemDelegate{
@@ -487,6 +639,7 @@ func (m *listModel) updateDelegate() {
 		width:         m.width,
 		cols:          m.cols,
 		idColWidth:    m.idColWidth,
+		showFold:      m.showFold,
 		selectedBeans: &m.selectedBeans,
 	}
 	m.list.SetDelegate(delegate)
@@ -548,6 +701,7 @@ func (m listModel) Footer() string {
 	} else if m.hasActiveFilter() {
 		help = helpKeyStyle.Render("space") + " " + helpStyle.Render("select") + "  " +
 			helpKeyStyle.Render("enter") + " " + helpStyle.Render("view") + "  " +
+			helpKeyStyle.Render("tab") + " " + helpStyle.Render("fold") + "  " +
 			helpKeyStyle.Render("b") + " " + helpStyle.Render("blocking") + "  " +
 			helpKeyStyle.Render("c") + " " + helpStyle.Render("create") + "  " +
 			helpKeyStyle.Render("e") + " " + helpStyle.Render("edit") + "  " +
@@ -562,6 +716,7 @@ func (m listModel) Footer() string {
 	} else {
 		help = helpKeyStyle.Render("space") + " " + helpStyle.Render("select") + "  " +
 			helpKeyStyle.Render("enter") + " " + helpStyle.Render("view") + "  " +
+			helpKeyStyle.Render("tab") + " " + helpStyle.Render("fold") + "  " +
 			helpKeyStyle.Render("b") + " " + helpStyle.Render("blocking") + "  " +
 			helpKeyStyle.Render("c") + " " + helpStyle.Render("create") + "  " +
 			helpKeyStyle.Render("e") + " " + helpStyle.Render("edit") + "  " +
@@ -612,4 +767,3 @@ func (m listModel) ViewConstrained(width, height int) string {
 
 	return m.viewContent(innerHeight)
 }
-

@@ -315,19 +315,74 @@ type FlatItem struct {
 	Matched        bool   // true if bean matched filter (vs. shown for context)
 	TreePrefix     string // pre-computed tree prefix (e.g., "  └─")
 	ImplicitStatus string // implicit terminal status from an ancestor, if any
+	HasChildren    bool   // true if this node has children (foldable)
+	Collapsed      bool   // true if this node's children are folded away
+	HiddenCount    int    // number of descendants hidden by the fold
 }
 
 // FlattenTree converts a tree into a flat slice with tree context preserved.
 // Each item includes the pre-computed tree prefix for rendering.
 func FlattenTree(nodes []*TreeNode) []FlatItem {
+	return FlattenTreeCollapsed(nodes, nil)
+}
+
+// FlattenTreeCollapsed flattens a tree, omitting the children of any node whose
+// ID is marked in collapsed. A collapsed node is still included, flagged with
+// Collapsed and the number of descendants it hides.
+func FlattenTreeCollapsed(nodes []*TreeNode, collapsed map[string]bool) []FlatItem {
 	var items []FlatItem
-	flattenNodes(nodes, 0, nil, &items)
+	flattenNodes(nodes, 0, nil, collapsed, &items)
 	return items
+}
+
+// CountDescendants returns the total number of nodes below this one.
+func CountDescendants(node *TreeNode) int {
+	count := 0
+	for _, child := range node.Children {
+		count += 1 + CountDescendants(child)
+	}
+	return count
+}
+
+// AutoCollapsed returns the set of node IDs that should start out folded: any
+// node whose children are all done, recursively. The node's own status does not
+// matter — an open parent with nothing left to do still folds away.
+// isDone reports whether a status counts as terminal (e.g. completed/scrapped).
+func AutoCollapsed(nodes []*TreeNode, isDone func(status string) bool) map[string]bool {
+	result := make(map[string]bool)
+	for _, node := range nodes {
+		autoCollapseNode(node, isDone, result)
+	}
+	return result
+}
+
+// autoCollapseNode reports whether node's subtree (including node itself) is
+// entirely done, recording foldable done-parents in result along the way.
+func autoCollapseNode(node *TreeNode, isDone func(status string) bool, result map[string]bool) bool {
+	childrenDone := true
+	for _, child := range node.Children {
+		if !autoCollapseNode(child, isDone, result) {
+			childrenDone = false
+		}
+	}
+	if childrenDone && len(node.Children) > 0 {
+		result[node.Bean.ID] = true
+	}
+	return childrenDone && isDone(effectiveStatus(node))
+}
+
+// effectiveStatus returns the bean's own status, or the status implicitly
+// inherited from a terminal ancestor when there is one.
+func effectiveStatus(node *TreeNode) string {
+	if node.ImplicitStatus != "" {
+		return node.ImplicitStatus
+	}
+	return node.Bean.Status
 }
 
 // flattenNodes recursively flattens tree nodes.
 // ancestry tracks whether each parent level was a last child (true = last, no continuation line needed)
-func flattenNodes(nodes []*TreeNode, depth int, ancestry []bool, items *[]FlatItem) {
+func flattenNodes(nodes []*TreeNode, depth int, ancestry []bool, collapsed map[string]bool, items *[]FlatItem) {
 	for i, node := range nodes {
 		isLast := i == len(nodes)-1
 
@@ -350,23 +405,32 @@ func flattenNodes(nodes []*TreeNode, depth int, ancestry []bool, items *[]FlatIt
 			}
 		}
 
-		*items = append(*items, FlatItem{
+		hasChildren := len(node.Children) > 0
+		isCollapsed := hasChildren && collapsed[node.Bean.ID]
+
+		item := FlatItem{
 			Bean:           node.Bean,
 			Depth:          depth,
 			IsLast:         isLast,
 			Matched:        node.Matched,
 			TreePrefix:     prefix,
 			ImplicitStatus: node.ImplicitStatus,
-		})
+			HasChildren:    hasChildren,
+			Collapsed:      isCollapsed,
+		}
+		if isCollapsed {
+			item.HiddenCount = CountDescendants(node)
+		}
+		*items = append(*items, item)
 
 		// Recurse into children, passing updated ancestry
 		// Only add to ancestry when depth > 0 (roots have no connectors to continue)
-		if len(node.Children) > 0 {
+		if hasChildren && !isCollapsed {
 			var newAncestry []bool
 			if depth > 0 {
 				newAncestry = append(ancestry, isLast)
 			}
-			flattenNodes(node.Children, depth+1, newAncestry, items)
+			flattenNodes(node.Children, depth+1, newAncestry, collapsed, items)
 		}
 	}
 }
@@ -380,4 +444,25 @@ func MaxTreeDepth(items []FlatItem) int {
 		}
 	}
 	return maxDepth
+}
+
+// Fold marker glyphs, rendered in a fixed-width column before the bean ID.
+const (
+	foldMarkerOpen   = "▾ "
+	foldMarkerClosed = "▸ "
+	foldMarkerNone   = "  "
+	FoldMarkerWidth  = 2
+)
+
+// FoldMarker returns the fold indicator for a row: an open/closed triangle for
+// nodes with children, or blank padding for leaves (keeping columns aligned).
+func FoldMarker(hasChildren, collapsed bool) string {
+	switch {
+	case !hasChildren:
+		return foldMarkerNone
+	case collapsed:
+		return foldMarkerClosed
+	default:
+		return foldMarkerOpen
+	}
 }
