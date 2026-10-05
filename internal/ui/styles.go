@@ -18,6 +18,7 @@ var (
 	ColorSubtle    = lipgloss.Color("#555555") // Dark gray (for tree lines)
 	ColorBlue      = lipgloss.Color("#3B82F6") // Blue
 	ColorCyan      = lipgloss.Color("14")      // Bright Cyan (ANSI)
+	ColorOrange    = lipgloss.Color("#F97316") // Orange
 )
 
 // NamedColors maps color names to lipgloss colors.
@@ -30,6 +31,7 @@ var NamedColors = map[string]lipgloss.Color{
 	"blue":   ColorBlue,
 	"purple": ColorPrimary,
 	"cyan":   ColorCyan,
+	"orange": ColorOrange,
 }
 
 // ResolveColor converts a color name or hex code to a lipgloss.Color.
@@ -172,7 +174,7 @@ var Header = lipgloss.NewStyle().
 // RenderStatus returns a styled status badge based on the status string (legacy, uses hardcoded colors)
 func RenderStatus(status string) string {
 	switch status {
-	case "todo", "draft":
+	case "todo", "draft", "stale":
 		return StatusOpen.Render(status)
 	case "completed", "scrapped":
 		return StatusDone.Render(status)
@@ -186,7 +188,7 @@ func RenderStatus(status string) string {
 // RenderStatusText returns styled status text (for tables, no background) (legacy, uses hardcoded colors)
 func RenderStatusText(status string) string {
 	switch status {
-	case "todo", "draft":
+	case "todo", "draft", "stale":
 		return StatusOpenText.Render(status)
 	case "completed", "scrapped":
 		return StatusDoneText.Render(status)
@@ -303,6 +305,8 @@ func ShortStatus(s string) string {
 		return "T"
 	case "in-progress":
 		return "I"
+	case "stale":
+		return "X"
 	case "completed":
 		return "C"
 	case "scrapped":

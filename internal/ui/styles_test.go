@@ -185,6 +185,7 @@ func TestShortStatus(t *testing.T) {
 		{"draft", "D"},
 		{"todo", "T"},
 		{"in-progress", "I"},
+		{"stale", "X"},
 		{"completed", "C"},
 		{"scrapped", "S"},
 		{"unknown", "?"},

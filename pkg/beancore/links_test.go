@@ -841,6 +841,7 @@ func TestIsResolvedStatus(t *testing.T) {
 		{"todo", false},
 		{"in-progress", false},
 		{"draft", false},
+		{"stale", false},
 		{"", false},
 	}
 

@@ -460,7 +460,7 @@ type Bean {
   path: String!
   "Bean title"
   title: String!
-  "Current status (draft, todo, in-progress, completed, scrapped)"
+  "Current status (draft, todo, in-progress, stale, completed, scrapped)"
   status: String!
   "Bean type (milestone, epic, bug, feature, task)"
   type: String!

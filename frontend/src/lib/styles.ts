@@ -4,6 +4,7 @@ export const statusColors: Record<string, string> = {
   draft: 'bg-status-draft-bg text-status-draft-text',
   todo: 'bg-status-todo-bg text-status-todo-text',
   'in-progress': 'bg-status-in-progress-bg text-status-in-progress-text',
+  stale: 'bg-status-stale-bg text-status-stale-text',
   completed: 'bg-status-completed-bg text-status-completed-text',
   scrapped: 'bg-status-scrapped-bg text-status-scrapped-text'
 };

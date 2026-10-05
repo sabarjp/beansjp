@@ -36,7 +36,7 @@
   let error = $state<string | null>(null);
 
   const types = ['task', 'bug', 'feature', 'epic', 'milestone'];
-  const statuses = ['draft', 'todo', 'in-progress', 'completed', 'scrapped'];
+  const statuses = ['draft', 'todo', 'in-progress', 'stale', 'completed', 'scrapped'];
   const priorities = ['critical', 'high', 'normal', 'low', 'deferred'];
 
   // Available parents (all beans except current bean and its descendants)

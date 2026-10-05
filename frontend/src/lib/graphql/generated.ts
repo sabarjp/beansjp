@@ -164,7 +164,7 @@ export type Bean = {
   priority: Scalars['String']['output'];
   /** Human-readable slug from filename */
   slug?: Maybe<Scalars['String']['output']>;
-  /** Current status (draft, todo, in-progress, completed, scrapped) */
+  /** Current status (draft, todo, in-progress, stale, completed, scrapped) */
   status: Scalars['String']['output'];
   /** Tags for categorization */
   tags: Array<Scalars['String']['output']>;

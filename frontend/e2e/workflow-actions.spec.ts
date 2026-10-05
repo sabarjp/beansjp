@@ -10,6 +10,7 @@ test.describe('Workflow action buttons', () => {
     const detail = page.locator('h1', { hasText: 'Draft Bean' }).locator('..');
 
     await expect(detail.getByRole('button', { name: 'Todo' })).toBeVisible();
+    await expect(detail.getByRole('button', { name: 'Stale' })).toBeVisible();
     await expect(detail.getByRole('button', { name: 'Scrap' })).toBeVisible();
     await expect(detail.getByRole('button', { name: 'Complete' })).not.toBeVisible();
   });
@@ -26,9 +27,24 @@ test.describe('Workflow action buttons', () => {
 
     const detail = page.locator('h1', { hasText: 'Todo Bean' }).locator('..');
 
+    await expect(detail.getByRole('button', { name: 'Stale' })).toBeVisible();
     await expect(detail.getByRole('button', { name: 'Scrap' })).toBeVisible();
     await expect(detail.getByRole('button', { name: 'Todo' })).not.toBeVisible();
     await expect(detail.getByRole('button', { name: 'Complete' })).not.toBeVisible();
+  });
+
+  test('stale bean shows Draft and Scrap buttons', async ({ beans, backlogPage, page }) => {
+    beans.create('Stale Bean', { status: 'stale', type: 'task' });
+
+    await backlogPage.goto(1);
+    await backlogPage.selectBean('Stale Bean');
+
+    const detail = page.locator('h1', { hasText: 'Stale Bean' }).locator('..');
+
+    await expect(detail.getByRole('button', { name: 'Draft' })).toBeVisible();
+    await expect(detail.getByRole('button', { name: 'Scrap' })).toBeVisible();
+    await expect(detail.getByRole('button', { name: 'Todo' })).not.toBeVisible();
+    await expect(detail.getByRole('button', { name: 'Archive' })).not.toBeVisible();
   });
 
   test('in-progress bean shows Complete and Scrap buttons', async ({
@@ -92,6 +108,27 @@ test.describe('Workflow action buttons', () => {
     // Workflow buttons should update to todo state
     await expect(detail.getByRole('button', { name: 'Scrap' })).toBeVisible({ timeout: 5000 });
     await expect(detail.getByRole('button', { name: 'Todo' })).not.toBeVisible();
+  });
+
+  test('Stale button moves todo bean to stale, Draft moves it back', async ({
+    beans,
+    backlogPage,
+    page
+  }) => {
+    beans.create('Aging Bean', { status: 'todo', type: 'task' });
+
+    await backlogPage.goto(1);
+    await backlogPage.selectBean('Aging Bean');
+
+    const detail = page.locator('h1', { hasText: 'Aging Bean' }).locator('..');
+
+    await detail.getByRole('button', { name: 'Stale' }).click();
+    await expect(detail.getByRole('button', { name: 'Draft' })).toBeVisible({ timeout: 5000 });
+    await expect(detail.getByRole('button', { name: 'Stale' })).not.toBeVisible();
+
+    await detail.getByRole('button', { name: 'Draft' }).click();
+    await expect(detail.getByRole('button', { name: 'Todo' })).toBeVisible({ timeout: 5000 });
+    await expect(detail.getByRole('button', { name: 'Stale' })).toBeVisible();
   });
 
   test('Complete button moves in-progress bean to completed', async ({

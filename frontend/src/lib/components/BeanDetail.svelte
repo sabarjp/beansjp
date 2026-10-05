@@ -54,18 +54,26 @@
   type WorkflowAction = { label: string; status: string; icon: string; iconColor: string };
 
   const workflowActions = $derived.by((): WorkflowAction[] => {
+    const scrap = { label: 'Scrap', status: 'scrapped', icon: 'icon-[uil--trash-alt]', iconColor: 'text-danger' };
+    const stale = { label: 'Stale', status: 'stale', icon: 'icon-[uil--history]', iconColor: 'text-orange-400' };
     switch (bean.status) {
       case 'draft':
         return [
           { label: 'Todo', status: 'todo', icon: 'icon-[uil--clipboard-notes]', iconColor: 'text-sky-400' },
-          { label: 'Scrap', status: 'scrapped', icon: 'icon-[uil--trash-alt]', iconColor: 'text-danger' }
+          stale,
+          scrap
         ];
       case 'todo':
-        return [{ label: 'Scrap', status: 'scrapped', icon: 'icon-[uil--trash-alt]', iconColor: 'text-danger' }];
+        return [stale, scrap];
       case 'in-progress':
         return [
           { label: 'Complete', status: 'completed', icon: 'icon-[uil--check-circle]', iconColor: 'text-success' },
-          { label: 'Scrap', status: 'scrapped', icon: 'icon-[uil--trash-alt]', iconColor: 'text-danger' }
+          scrap
+        ];
+      case 'stale':
+        return [
+          { label: 'Draft', status: 'draft', icon: 'icon-[uil--pen]', iconColor: 'text-text-muted' },
+          scrap
         ];
       default:
         return [];

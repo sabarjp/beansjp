@@ -165,7 +165,7 @@ export class BeansStore {
  * Sort order arrays matching the backend's config.DefaultStatuses/Priorities/Types.
  * These must stay in sync with internal/config/config.go.
  */
-const STATUS_ORDER = ['in-progress', 'todo', 'draft', 'completed', 'scrapped'];
+const STATUS_ORDER = ['in-progress', 'todo', 'draft', 'stale', 'completed', 'scrapped'];
 const PRIORITY_ORDER = ['critical', 'high', 'normal', 'low', 'deferred'];
 const TYPE_ORDER = ['milestone', 'epic', 'bug', 'feature', 'task'];
 

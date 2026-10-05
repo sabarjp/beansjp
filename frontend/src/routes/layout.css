@@ -343,6 +343,8 @@ tr.diff-hunk td {
   --th-status-in-progress-text: var(--color-blue-700);
   --th-status-completed-bg: var(--color-purple-100);
   --th-status-completed-text: var(--color-purple-700);
+  --th-status-stale-bg: var(--color-orange-100);
+  --th-status-stale-text: var(--color-orange-700);
   --th-status-scrapped-bg: var(--color-red-100);
   --th-status-scrapped-text: var(--color-red-700);
   --th-status-blocked-bg: var(--color-amber-100);
@@ -399,6 +401,8 @@ tr.diff-hunk td {
     --th-status-in-progress-text: var(--color-blue-300);
     --th-status-completed-bg: var(--color-purple-900);
     --th-status-completed-text: var(--color-purple-300);
+    --th-status-stale-bg: var(--color-orange-950);
+    --th-status-stale-text: var(--color-orange-300);
     --th-status-scrapped-bg: var(--color-red-950);
     --th-status-scrapped-text: var(--color-red-300);
     --th-status-blocked-bg: var(--color-amber-950);
@@ -453,6 +457,8 @@ tr.diff-hunk td {
   --color-status-in-progress-text: var(--th-status-in-progress-text);
   --color-status-completed-bg: var(--th-status-completed-bg);
   --color-status-completed-text: var(--th-status-completed-text);
+  --color-status-stale-bg: var(--th-status-stale-bg);
+  --color-status-stale-text: var(--th-status-stale-text);
   --color-status-scrapped-bg: var(--th-status-scrapped-bg);
   --color-status-scrapped-text: var(--th-status-scrapped-text);
   --color-status-blocked-bg: var(--th-status-blocked-bg);

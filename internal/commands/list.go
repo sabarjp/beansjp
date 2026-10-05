@@ -39,6 +39,17 @@ var (
 	listFull       bool
 )
 
+// applyReadyFilter narrows filter to beans available to start: not blocked,
+// excluding in-progress/completed/scrapped/draft/stale, and excluding beans
+// with implicit terminal status from a scrapped/completed ancestor.
+func applyReadyFilter(filter *model.BeanFilter) {
+	isBlocked := false
+	excludeImplicitTerminal := true
+	filter.IsBlocked = &isBlocked
+	filter.ExcludeStatus = append(filter.ExcludeStatus, "in-progress", "completed", "scrapped", "draft", "stale")
+	filter.ExcludeImplicitTerminal = &excludeImplicitTerminal
+}
+
 var listCmd = &cobra.Command{
 	Use:     "list",
 	Aliases: []string{"ls"},
@@ -101,14 +112,8 @@ Search Syntax (--search/-S):
 			filter.IsBlocked = &listIsBlocked
 		}
 
-		// --ready: beans available to start (not blocked, excludes in-progress/completed/scrapped/draft,
-		// and excludes beans with implicit terminal status from a scrapped/completed ancestor)
 		if listReady {
-			isBlocked := false
-			excludeImplicitTerminal := true
-			filter.IsBlocked = &isBlocked
-			filter.ExcludeStatus = append(filter.ExcludeStatus, "in-progress", "completed", "scrapped", "draft")
-			filter.ExcludeImplicitTerminal = &excludeImplicitTerminal
+			applyReadyFilter(filter)
 		}
 
 		// Execute query via core resolver
@@ -307,7 +312,7 @@ func RegisterListCmd(root *cobra.Command) {
 	listCmd.Flags().BoolVar(&listHasBlocking, "has-blocking", false, "Filter beans that are blocking others")
 	listCmd.Flags().BoolVar(&listNoBlocking, "no-blocking", false, "Filter beans that aren't blocking others")
 	listCmd.Flags().BoolVar(&listIsBlocked, "is-blocked", false, "Filter beans that are blocked by others")
-	listCmd.Flags().BoolVar(&listReady, "ready", false, "Filter beans available to start (not blocked, excludes in-progress/completed/scrapped/draft)")
+	listCmd.Flags().BoolVar(&listReady, "ready", false, "Filter beans available to start (not blocked, excludes in-progress/completed/scrapped/draft/stale)")
 	listCmd.Flags().BoolVarP(&listQuiet, "quiet", "q", false, "Only output IDs (one per line)")
 	listCmd.Flags().StringVar(&listSort, "sort", "", "Sort by: created, updated, status, priority, id (default: status, priority, type, title)")
 	listCmd.Flags().BoolVar(&listFull, "full", false, "Include bean body in JSON output")

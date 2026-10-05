@@ -29,6 +29,9 @@
   const filteredDraftBeans = $derived(
     filterBeans(topLevelBeans.filter((b) => b.status === 'draft'))
   );
+  const filteredStaleBeans = $derived(
+    filterBeans(topLevelBeans.filter((b) => b.status === 'stale'))
+  );
 
   function handleKeydown(e: KeyboardEvent) {
     if ((e.metaKey || e.ctrlKey) && (e.key === 'f' || e.key === '/')) {
@@ -128,6 +131,7 @@
 
               {@render backlogSection(filteredTodoBeans, 'todo', 'Todo')}
               {@render backlogSection(filteredDraftBeans, 'draft', 'Draft')}
+              {@render backlogSection(filteredStaleBeans, 'stale', 'Stale')}
             </div>
           {:else}
             <BoardView onSelect={(b) => ui.selectBean(b)} selectedId={ui.currentBean?.id} />

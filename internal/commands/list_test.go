@@ -1,10 +1,13 @@
 package commands
 
 import (
+	"context"
 	"testing"
 	"time"
 
 	"github.com/hmans/beans/pkg/bean"
+	"github.com/hmans/beans/pkg/beangraph"
+	"github.com/hmans/beans/pkg/beangraph/model"
 	"github.com/hmans/beans/pkg/config"
 )
 
@@ -165,3 +168,29 @@ func TestTruncate(t *testing.T) {
 	}
 }
 
+
+func TestApplyReadyFilter(t *testing.T) {
+	testCore, cleanup := setupQueryTestCore(t)
+	defer cleanup()
+
+	for _, status := range []string{"todo", "in-progress", "draft", "stale", "completed", "scrapped"} {
+		createQueryTestBean(t, testCore, "ready-"+status, "Bean "+status, status)
+	}
+
+	filter := &model.BeanFilter{}
+	applyReadyFilter(filter)
+
+	resolver := &beangraph.CoreResolver{Core: testCore}
+	beans, err := resolver.Beans(context.Background(), filter)
+	if err != nil {
+		t.Fatalf("Beans() error = %v", err)
+	}
+
+	if len(beans) != 1 || beans[0].Status != "todo" {
+		var got []string
+		for _, b := range beans {
+			got = append(got, b.Status)
+		}
+		t.Errorf("ready beans have statuses %v, want [todo]", got)
+	}
+}

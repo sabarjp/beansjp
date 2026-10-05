@@ -30,7 +30,7 @@ AFTER finishing any task:
 When the user asks what to work on next:
 
 ```bash
-# Find beans ready to start (not blocked, excludes in-progress/completed/scrapped/draft)
+# Find beans ready to start (not blocked, excludes in-progress/completed/scrapped/draft/stale)
 beans list --json --ready
 
 # View full details of specific beans (supports multiple IDs)
@@ -43,7 +43,7 @@ beans show --json <id> [id...]
 ```bash
 # List beans
 beans list --json                      # All beans
-beans list --json --ready              # Beans ready to start (not blocked, excludes in-progress/completed/scrapped/draft)
+beans list --json --ready              # Beans ready to start (not blocked, excludes in-progress/completed/scrapped/draft/stale)
 beans list --json -t bug -s todo       # Filter by type and status
 beans list --json -S "authentication"  # Full-text search
 beans list --help                      # Full options

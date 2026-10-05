@@ -9,17 +9,45 @@ test.describe('Backlog sorting', () => {
     beans.create('Todo Normal Bug', { status: 'todo', priority: 'normal', type: 'bug' });
     beans.create('Todo High Feature', { status: 'todo', priority: 'high', type: 'feature' });
     beans.create('Draft Idea', { status: 'draft', priority: 'low', type: 'task' });
+    beans.create('Stale Idea', { status: 'stale', priority: 'high', type: 'task' });
 
-    await backlogPage.goto(4);
+    await backlogPage.goto(5);
 
     const titles = await backlogPage.getBeanTitles();
-    // Todo section first (sorted by priority, then type, then title), then Draft section
+    // Todo section first (sorted by priority, then type, then title), then Draft, then Stale
     expect(titles).toEqual([
       'Todo High Feature',
       'Todo Normal Bug',
       'Todo Normal Task',
-      'Draft Idea'
+      'Draft Idea',
+      'Stale Idea'
     ]);
+  });
+
+  test('child beans are sorted by status, with stale between draft and completed', async ({
+    beans,
+    backlogPage
+  }) => {
+    const parentId = beans.create('Parent Epic', { status: 'todo', type: 'epic' });
+    for (const status of ['completed', 'stale', 'draft', 'todo']) {
+      const id = beans.create(`Child ${status}`, { status, type: 'task' });
+      beans.run(['update', id, '--parent', parentId]);
+    }
+
+    await backlogPage.goto(5);
+
+    await expect(async () => {
+      const childTitles = await backlogPage
+        .beanByTitle('Parent Epic')
+        .locator('.bean-item [role="button"] > div > span.text-sm')
+        .allTextContents();
+      expect(childTitles.map((t) => t.trim())).toEqual([
+        'Child todo',
+        'Child draft',
+        'Child stale',
+        'Child completed'
+      ]);
+    }).toPass({ timeout: 5_000 });
   });
 
   test('list re-sorts when a bean priority changes on disk', async ({ beans, backlogPage }) => {
